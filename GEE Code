@@ -1,0 +1,39 @@
+Map.centerObject(geometry,11);
+
+var SRTM = ee.Image("USGS/SRTMGL1_003");
+var imageCollection = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2");
+var srtmClip = SRTM.clip(geometry);
+function NBR_func (image){
+  var NBR = image.normalizedDifference(['SR_B5', 'SR_B7']);
+  var elevationMask = srtmClip.gt(30);
+  return NBR.updateMask(elevationMask);
+}
+var base_year = 2019;
+var Prel8 = imageCollection.filterDate((base_year)+'-05-01',(base_year)+'-12-30').median().clip(geometry);
+var preNBR = NBR_func(Prel8);
+var Postl8 = imageCollection.filterDate((base_year+1)+'-05-01',(base_year+1)+'-12-30').median().clip(geometry);
+var postNBR = NBR_func(Postl8);
+function dNBR_cal (image1, image2){
+  var dNBR = image1.subtract(image2).multiply(1000);
+  return dNBR;
+}
+var dNBR = dNBR_cal(preNBR, postNBR);
+function less_masker (image){
+  var less_mask = dNBR.lt(-300);
+  return image.updateMask(less_mask);
+}
+function great_masker (image){
+  var great_mask = dNBR.gt(300);
+  return image.updateMask(great_mask);
+}
+var masked_dNBR = ee.ImageCollection([less_masker(dNBR), great_masker(dNBR)]).mosaic();
+Map.addLayer(masked_dNBR, {}, 'Masked DNBR '+base_year);
+Export.image.toDrive({
+  image: masked_dNBR,
+  description: 'DisturbedVeg'+base_year,
+  region: geometry,
+  folder: 'GEE',
+  scale: 30,
+  maxPixels: 1e13,
+  skipEmptyTiles: true,
+  });
